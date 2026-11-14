@@ -1,0 +1,427 @@
+---
+title: "Capstone: Who Gets a Callback? Racial Signals, Resume Quality, and Hiring Responses"
+subtitle: "A Binary Logistic Regression Analysis with Job-Level Random Intercepts"
+author: "Ching-Yi Cheng"
+date: November 30 2026
+format: 
+    html:
+      toc: true
+      code-fold: true
+      code-summary: "Show code"
+      df-print: paged
+execute:
+    echo: false
+    warning: false
+---
+
+# Introduction
+A callback is an early step in the hiring process. In the field experiment by Bertrand and Mullainathan (2004), researchers sent fictitious resumes to real job openings and assigned first names intended to signal different racial identities. This report estimates how callback probability differs between resumes with names intended to signal Black or White identity, before and after including resumes quality and city in the model.
+
+**Research question.** How does the probability of an employer callback differ by the racial signal conveyed by the assigned first name, after accounting for resumes quality and city?
+
+**Prediction.** Based on the original study, resumes with names intended to signal White identity are expected to receive callbacks more often than those with names intended to signal Black identity. This project is a reanalysis of the original experiment, so the prediction reflects prior knowledge of its findings.
+
+# Workflow
+
+1. Prepare one analysis sample and inspect the distribution of callbacks, resume characteristics, and applications per job advertisement.
+2. Fit four nested binary logistic mixed models with the same job advertisement random intercept.
+3. Compare the models using likelihood-ratio tests, AIC, and BIC.
+4. Check convergence and inspect simulation-based residuals overall, across name-signal groups, and within the job advertisement grouping structure.
+5. Report adjusted odds ratios and visualize model-estimated callback probabilities for a specified job setting.
+6. Interpret the findings in the context of the experimental design.
+
+# Overview of the Models
+
+| Model | Fixed effects | Question |
+|---|---|---|
+| M0 | Intercept | What is the baseline model before adding resume or city predictors? |
+| M1 | Assigned name's racial signal | Does including the racial signal improve fit? |
+| M2 | M1 + resume quality | Does resume quality improve fit beyond the racial signal? |
+| M3 | M2 + city | Does city improve fit beyond the resume characteristics? |
+
+All models include a random intercept for job advertisement because several resume can be sent to the same opening. This term allows baseline callback odds to vary across advertisements. The binary outcome is modeled with a binomial distribution and a logit link.
+
+# Dataset
+Bertrand, Marianne, and Sendhil Mullainathan. 2004. "Are Emily and Greg More Employable Than Lakisha and Jamal? A Field Experiment on Labor Market Discrimination." American Economic Review 94(4): 991–1013. https://doi.org/10.1257/0002828042002561 
+
+The [OpenIntro resume dataset](https://openintrostat.github.io/openintro/reference/resume.html) contains 4,870 applications sent to job openings in Boston and Chicago in 2001 and 2002. Each row represents one application. The data are distributed with the `openintro` R package.
+
+| R variable | Role | Definition |
+|---|---|---|
+| `received_callback` | Outcome | 1 = received a callback, 0 = did not receive a callback |
+| `race` | Main predictor | Racial signal conveyed by the assigned first name. Black signal is the reference. |
+| `resume_quality` | Predictor | Low or high resume quality, as coded in the dataset. Low is the reference. |
+| `job_city` | Predictor | City in which the job was advertised. Boston is the reference. |
+| `job_ad_id` | Grouping variable | Identifier for a job advertisement |
+
+
+# Part 1. Prepare and explore the data
+Install the packages once in the R console with `install.packages(c("openintro", "glmmTMB", "dplyr", "tidyr", "ggplot2", "gt", "DHARMa", "broom.mixed", "scales"))`.
+
+```{r}
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gt)
+
+raw_data <- openintro::resume
+
+analysis_data <- raw_data |>
+  select(received_callback, race, resume_quality, job_city, job_ad_id) |>
+  mutate(
+    race = factor(tolower(race), levels = c("black", "white"),
+                  labels = c("Black signal", "White signal")),
+    resume_quality = factor(tolower(resume_quality),
+                            levels = c("low", "high"),
+                            labels = c("Low", "High")),
+    job_city = factor(tolower(job_city), levels = c("boston", "chicago"),
+                      labels = c("Boston", "Chicago")),
+    job_ad_id = factor(job_ad_id)
+  ) |>
+  drop_na()
+
+stopifnot(
+  setequal(unique(analysis_data$received_callback), c(0, 1)),
+  all(vapply(analysis_data[c("race", "resume_quality", "job_city")],
+             function(x) n_distinct(x) == 2L, logical(1)))
+)
+
+n_applications <- nrow(analysis_data)
+n_ads <- n_distinct(analysis_data$job_ad_id)
+callback_rate <- mean(analysis_data$received_callback)
+pct <- function(x) scales::percent(x, accuracy = 0.1)
+pp <- function(x) sprintf("%.1f", 100 * x)
+p_label <- function(x) format.pval(x, digits = 3, eps = .001)
+
+glimpse(analysis_data)
+```
+
+```{r}
+table(analysis_data$received_callback)
+table(analysis_data$race)
+table(analysis_data$resume_quality)
+table(analysis_data$job_city)
+```
+After cleaning the data, I tabulated the callback outcome, the racial signal conveyed by the assigned name, resume quality, and job city. These counts show how applications are distributed across categories in the sample used for the model comparisons.
+
+The analysis uses `r n_applications` applications across `r n_ads` job advertisements. Complete-case filtering excluded `r nrow(raw_data) - n_applications` applications. The overall observed callback rate was `r pct(callback_rate)`. All four models use the same applications so their fit statistics can be compared directly.
+
+## 1.Calculate observed callback rates
+```{r}
+#| label: tbl-raw-rates
+#| tbl-cap: "Observed callback rates by racial signal and resume quality"
+
+observed_rates <- analysis_data |>
+  group_by(race, resume_quality) |>
+  summarise(
+    applications = n(),
+    callbacks = sum(received_callback),
+    callback_rate = mean(received_callback),
+    .groups = "drop"
+  )
+
+observed_rates |>
+  gt() |>
+  cols_label(race = "Name signal", resume_quality = "Resume quality",
+             applications = "Applications", callbacks = "Callbacks",
+             callback_rate = "Observed rate") |>
+  fmt_integer(columns = c(applications, callbacks)) |>
+  fmt_percent(columns = callback_rate, decimals = 1)
+```
+
+These rates describe the applications as submitted. The table gives the denominator for each group and helps distinguish how often callbacks occurred from how many applications were submitted.
+
+## 2.Examine how many applications each job advertisement received
+```{r}
+#| label: fig-ad-sizes
+#| fig-cap: "Applications sent per job advertisement"
+
+ad_sizes <- count(analysis_data, job_ad_id, name = "applications")
+
+ad_sizes |>
+  count(applications, name = "job_advertisements")
+
+ggplot(ad_sizes, aes(x = factor(applications))) +
+  geom_bar(fill = "#2AAAF5") +
+  labs(x = "Applications per advertisement", y = "Job advertisements") +
+  theme_minimal(base_size = 12)
+```
+
+# Part 2. Fit the four models
+The random intercept stays in every model, including M0. Each successive model adds one fixed predictor, which allows us to compare what that predictor contributes at that step. The model treats the racial-signal contrast as a common odds ratio across resume quality levels and cities.
+
+```{r}
+# M0: Baseline model with a random intercept for job advertisement
+mod0 <- glmmTMB(
+  received_callback ~ 1 + (1 | job_ad_id),
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+# M1: Add the racial signal conveyed by the assigned name
+mod1 <- glmmTMB(
+  received_callback ~ race + (1 | job_ad_id),
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+# M2: Add resume quality
+mod2 <- glmmTMB(
+  received_callback ~ race + resume_quality + (1 | job_ad_id),
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+# M3: Add the city where the job was advertised
+mod3 <- glmmTMB(
+  received_callback ~ race + resume_quality + job_city + (1 | job_ad_id),
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+# Display the summary of each model
+summary(mod0)
+summary(mod1)
+summary(mod2)
+summary(mod3)
+
+# Verify that all models use the same number of applications
+models <- list(M0 = mod0, M1 = mod1, M2 = mod2, M3 = mod3)
+stopifnot(all(vapply(models, nobs, numeric(1)) == n_applications))
+```
+
+## 1.Check optimizer convergence and whether the Hessian is positive definite
+```{r}
+fit_checks <- vapply(
+  models,
+  function(model) {
+    isTRUE(model$fit$convergence == 0) &&
+      isTRUE(model$sdr$pdHess)
+  },
+  logical(1)
+)
+
+fit_checks
+```
+
+
+# Part 3. Compare model fit
+Each likelihood-ratio test compares a model with the row immediately above it. AIC and BIC summarize fit with a penalty for additional parameters. The contribution of each predictor in the likelihood-ratio tests depends on the model sequence.
+
+```{r}
+#| label: tbl-fit
+#| tbl-cap: "Fit of the four nested mixed models"
+
+comparison <- tibble(
+  model = names(models),
+  added_term = c("Baseline", "Racial signal", "Resume quality", "City"),
+  log_lik = vapply(models, function(m) as.numeric(logLik(m)), numeric(1)),
+  parameters = vapply(models, function(m) attr(logLik(m), "df"), numeric(1)),
+  aic = vapply(models, AIC, numeric(1)),
+  bic = vapply(models, BIC, numeric(1))
+) |>
+  mutate(
+    lrt = 2 * (log_lik - lag(log_lik)),
+    df = parameters - lag(parameters),
+    p = pchisq(lrt, df, lower.tail = FALSE)
+  )
+
+comparison |>
+  gt() |>
+  cols_label(model = "Model", added_term = "Term added",
+             log_lik = "Log-likelihood", parameters = "Parameters",
+             aic = "AIC", bic = "BIC", lrt = "LR χ²", df = "df", p = "p") |>
+  fmt_number(columns = c(log_lik, aic, bic, lrt), decimals = 2) |>
+  fmt(columns = p, fns = function(x) ifelse(is.na(x), NA_character_, p_label(x))) |>
+  sub_missing(columns = c(lrt, df, p), missing_text = "—")
+```
+
+The likelihood-ratio test for adding the name's racial signal to the baseline model gave χ²(`r comparison$df[2]`) = `r sprintf("%.2f", comparison$lrt[2])` (p `r if (comparison$p[2] < .001) "< .001" else paste("=", p_label(comparison$p[2]))`). The lowest AIC was for `r comparison$model[which.min(comparison$aic)]` and the lowest BIC was for `r comparison$model[which.min(comparison$bic)]`.
+
+# Part 4. Select and diagnose the primary model
+## 1.Model selection
+M2 is the primary reporting model. Adding resume quality to M1 improved fit, χ²(1) = `r sprintf("%.2f", comparison$lrt[3])`, *p* = `r p_label(comparison$p[3])`, and lowered AIC by `r sprintf("%.2f", comparison$aic[2] - comparison$aic[3])`. The BIC values for M1 and M2 were nearly identical. Adding city in M3 yielded little further improvement, χ²(1) = `r sprintf("%.2f", comparison$lrt[4])`, *p* = `r p_label(comparison$p[4])`, and increased both AIC and BIC. M2 estimates the callback contrast at the same resume quality and accounts for clustering within job advertisements. M3 checks how the estimated contrast changes after accounting for city.
+
+```{r}
+preferred_model <- mod2
+stopifnot(all(fit_checks[c("M2", "M3")]))
+```
+
+## 2.Simulation-based diagnostics
+The DHARMa Q–Q plot compares simulation-based residual quantiles with those expected under a uniform distribution. The plot on the right checks for residual patterns across fitted values. We also inspect residuals by racial signal and aggregate the simulated residuals at the job advertisement level.
+
+```{r}
+#| label: fig-diagnostics
+#| fig-cap: "DHARMa Q–Q plot and residuals versus predicted values"
+
+sim_res <- DHARMa::simulateResiduals(preferred_model, n = 1000, seed = 9041)
+plot(sim_res)
+```
+
+## 3.Dispersion test
+```{r}
+dispersion_test <- DHARMa::testDispersion(sim_res, plot = FALSE)
+dispersion_test
+```
+
+```{r}
+#| label: fig-race-residuals
+#| fig-cap: "Simulation-based residuals by name signal"
+
+DHARMa::plotResiduals(sim_res, form = analysis_data$race)
+```
+
+```{r}
+#| label: fig-ad-residuals
+#| fig-cap: "Simulation-based residuals aggregated by job advertisement"
+
+ad_res <- DHARMa::recalculateResiduals(
+  sim_res,
+  group = analysis_data$job_ad_id,
+  seed = 9041
+)
+plot(ad_res)
+```
+
+## 4.Summary of the Three Diagnostic Tests for Model 2
+```{r}
+uniformity_test <- DHARMa::testUniformity(sim_res, plot = FALSE)
+dispersion_test <- DHARMa::testDispersion(sim_res, plot = FALSE)
+ad_uniformity_test <- DHARMa::testUniformity(ad_res, plot = FALSE)
+
+tibble(
+  check = c("Application-level uniformity", "Application-level dispersion",
+            "Advertisement-level uniformity"),
+  p = c(uniformity_test$p.value, dispersion_test$p.value,
+        ad_uniformity_test$p.value)
+) |>
+  gt() |>
+  cols_label(check = "Diagnostic", p = "p") |>
+  fmt(columns = p, fns = p_label)
+```
+
+A systematic departure from the Q–Q diagonal, visible patterns by fitted value or group, or small diagnostic p-values warrant a closer look before interpreting M2. The plots and tests describe how the observed residual patterns compare with simulations from the fitted model.
+
+# Part 5. Interpret the adjusted model
+## 1.Adjusted odds ratios
+The odds ratios compare applications at a common job advertisement random-intercept value, holding the other fixed predictor constant. An odds ratio above 1 indicates higher odds of a callback for the category listed first.
+
+```{r}
+#| label: tbl-or
+#| tbl-cap: "Adjusted callback odds ratios from M2"
+
+odds_results <- broom.mixed::tidy(
+  preferred_model, effects = "fixed", component = "cond",
+  conf.int = TRUE, conf.method = "Wald"
+) |>
+  filter(term != "(Intercept)") |>
+  mutate(
+    predictor = recode(
+      term,
+      `raceWhite signal` = "White signal vs. Black signal",
+      resume_qualityHigh = "High vs. low résumé quality"
+    ),
+    odds_ratio = exp(estimate),
+    lower = exp(conf.low),
+    upper = exp(conf.high)
+  )
+
+race_or <- filter(odds_results, term == "raceWhite signal")
+stopifnot(nrow(race_or) == 1L)
+
+odds_results |>
+  select(predictor, odds_ratio, lower, upper) |>
+  gt() |>
+  cols_label(predictor = "Comparison", odds_ratio = "Odds ratio",
+             lower = "95% CI lower", upper = "95% CI upper") |>
+  fmt_number(columns = c(odds_ratio, lower, upper), decimals = 2)
+```
+
+The adjusted odds ratio for a White-signaling name relative to a Black-signaling name was `r sprintf("%.2f", race_or$odds_ratio)` (95% CI `r sprintf("%.2f to %.2f", race_or$lower, race_or$upper)`).
+
+## 2.Predicted callback probabilities
+To show the comparison in percentage points, the plot holds résumé quality at low. It sets the job advertisement random intercept to zero. The intervals reflect uncertainty in the estimated probabilities for this specified setting.
+
+```{r}
+#| label: fig-probabilities
+#| fig-cap: "Estimated callback probabilities for low-quality résumés, with the job advertisement random intercept set to zero."
+
+prediction_data <- tibble(
+  race = factor(levels(analysis_data$race), levels = levels(analysis_data$race)),
+  resume_quality = factor("Low", levels = levels(analysis_data$resume_quality))
+)
+
+# Calculate fixed-effect predictions on the logit scale.
+fixed_coefs <- glmmTMB::fixef(preferred_model)$cond
+fixed_cov <- vcov(preferred_model)$cond
+design <- model.matrix(~ race + resume_quality, prediction_data)
+design <- design[, names(fixed_coefs), drop = FALSE]
+logit_fit <- drop(design %*% fixed_coefs)
+logit_cov <- design %*% fixed_cov %*% t(design)
+logit_se <- sqrt(diag(logit_cov))
+
+prediction_data <- prediction_data |>
+  mutate(
+    probability = plogis(logit_fit),
+    lower = plogis(logit_fit - 1.96 * logit_se),
+    upper = plogis(logit_fit + 1.96 * logit_se)
+  )
+
+# Estimate the White-minus-Black probability difference using the delta method.
+probability_gap <- diff(prediction_data$probability)
+gap_gradient <- c(-1, 1) * prediction_data$probability *
+  (1 - prediction_data$probability)
+gap_se <- sqrt(drop(t(gap_gradient) %*% logit_cov %*% gap_gradient))
+gap_ci <- probability_gap + c(-1, 1) * 1.96 * gap_se
+
+ggplot(prediction_data, aes(x = race, y = probability)) +
+  geom_pointrange(aes(ymin = lower, ymax = upper), color = "#2C5F7C") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1),
+                     limits = c(0, NA)) +
+  labs(x = "Racial signal conveyed by the assigned name",
+       y = "Predicted probability of a callback") +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+prediction_data |> select(race, probability, lower, upper)
+100 * probability_gap
+100 * gap_ci
+```
+
+In this setting, estimated callback probabilities were `r pct(prediction_data$probability[1])` for a Black-signaling name and `r pct(prediction_data$probability[2])` for a White-signaling name. The estimated difference (White minus Black) was `r pp(probability_gap)` percentage points, with an approximate 95% confidence interval from `r pp(gap_ci[1])` to `r pp(gap_ci[2])` percentage points.
+
+## 3.Sensitivity to including city
+
+M2 and M3 use the same applications and the same job advertisement random intercept. Comparing their racial-signal odds ratios shows how much the estimate changes when city is included.
+
+```{r}
+#| label: tbl-city-sensitivity
+#| tbl-cap: "Racial-signal odds ratios before and after accounting for city"
+
+city_adjusted_or <- broom.mixed::tidy(
+  mod3, effects = "fixed", component = "cond",
+  conf.int = TRUE, conf.method = "Wald"
+) |>
+  filter(term == "raceWhite signal") |>
+  transmute(odds_ratio = exp(estimate), lower = exp(conf.low),
+            upper = exp(conf.high))
+
+bind_rows(
+  "M2: Résumé quality" = select(race_or, odds_ratio, lower, upper),
+  "M3: Résumé quality and city" = city_adjusted_or,
+  .id = "model"
+) |>
+  gt() |>
+  cols_label(model = "Model and adjustment variables",
+             odds_ratio = "Odds ratio",
+             lower = "95% CI lower", upper = "95% CI upper") |>
+  fmt_number(columns = c(odds_ratio, lower, upper), decimals = 2)
+```
+
+The estimated odds ratio was `r sprintf("%.2f", race_or$odds_ratio)` in M2 and `r sprintf("%.2f", city_adjusted_or$odds_ratio)` after including city in M3.
+
+# Part 6. Findings and limitations
+The adjusted model estimated a White-minus-Black callback probability difference of `r pp(probability_gap)` percentage points for low-quality résumés at a zero advertisement random intercept. The odds ratio summarizes the name-signal contrast across the two résumé quality levels. Random assignment supports interpreting the contrast in terms of the assigned names in this experiment. Names can convey several social cues at once, so a mechanism specifically attributable to perceived race requires additional evidence. The outcome records a callback, and the study's scope is limited to the sampled jobs and the two cities during the study period. The adjusted model estimates a common odds ratio for the name signal. A question about whether résumé quality changes that odds ratio would require an interaction term.
+
