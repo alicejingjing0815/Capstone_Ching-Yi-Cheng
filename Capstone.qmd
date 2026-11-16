@@ -2,7 +2,7 @@
 title: "Capstone: Who Gets a Callback? Racial Signals, Resume Quality, and Hiring Responses"
 subtitle: "A Binary Logistic Regression Analysis with Job-Level Random Intercepts"
 author: "Ching-Yi Cheng"
-date: November 30 2026
+date: November 16 2026
 format: 
     html:
       toc: true
@@ -55,7 +55,7 @@ The [OpenIntro resume dataset](https://openintrostat.github.io/openintro/referen
 | `job_ad_id` | Grouping variable | Identifier for a job advertisement |
 
 
-# Part 1. Prepare and explore the data
+# Part 1 Prepare and explore the data
 Install the packages once in the R console with `install.packages(c("openintro", "glmmTMB", "dplyr", "tidyr", "ggplot2", "gt", "DHARMa", "broom.mixed", "scales"))`.
 
 ```{r}
@@ -320,7 +320,7 @@ odds_results <- broom.mixed::tidy(
     predictor = recode(
       term,
       `raceWhite signal` = "White signal vs. Black signal",
-      resume_qualityHigh = "High vs. low résumé quality"
+      resume_qualityHigh = "High vs. low resume quality"
     ),
     odds_ratio = exp(estimate),
     lower = exp(conf.low),
@@ -340,59 +340,7 @@ odds_results |>
 
 The adjusted odds ratio for a White-signaling name relative to a Black-signaling name was `r sprintf("%.2f", race_or$odds_ratio)` (95% CI `r sprintf("%.2f to %.2f", race_or$lower, race_or$upper)`).
 
-## 2.Predicted callback probabilities
-To show the comparison in percentage points, the plot holds résumé quality at low. It sets the job advertisement random intercept to zero. The intervals reflect uncertainty in the estimated probabilities for this specified setting.
-
-```{r}
-#| label: fig-probabilities
-#| fig-cap: "Estimated callback probabilities for low-quality résumés, with the job advertisement random intercept set to zero."
-
-prediction_data <- tibble(
-  race = factor(levels(analysis_data$race), levels = levels(analysis_data$race)),
-  resume_quality = factor("Low", levels = levels(analysis_data$resume_quality))
-)
-
-# Calculate fixed-effect predictions on the logit scale.
-fixed_coefs <- glmmTMB::fixef(preferred_model)$cond
-fixed_cov <- vcov(preferred_model)$cond
-design <- model.matrix(~ race + resume_quality, prediction_data)
-design <- design[, names(fixed_coefs), drop = FALSE]
-logit_fit <- drop(design %*% fixed_coefs)
-logit_cov <- design %*% fixed_cov %*% t(design)
-logit_se <- sqrt(diag(logit_cov))
-
-prediction_data <- prediction_data |>
-  mutate(
-    probability = plogis(logit_fit),
-    lower = plogis(logit_fit - 1.96 * logit_se),
-    upper = plogis(logit_fit + 1.96 * logit_se)
-  )
-
-# Estimate the White-minus-Black probability difference using the delta method.
-probability_gap <- diff(prediction_data$probability)
-gap_gradient <- c(-1, 1) * prediction_data$probability *
-  (1 - prediction_data$probability)
-gap_se <- sqrt(drop(t(gap_gradient) %*% logit_cov %*% gap_gradient))
-gap_ci <- probability_gap + c(-1, 1) * 1.96 * gap_se
-
-ggplot(prediction_data, aes(x = race, y = probability)) +
-  geom_pointrange(aes(ymin = lower, ymax = upper), color = "#2C5F7C") +
-  scale_y_continuous(labels = scales::label_percent(accuracy = 1),
-                     limits = c(0, NA)) +
-  labs(x = "Racial signal conveyed by the assigned name",
-       y = "Predicted probability of a callback") +
-  theme_minimal(base_size = 12)
-```
-
-```{r}
-prediction_data |> select(race, probability, lower, upper)
-100 * probability_gap
-100 * gap_ci
-```
-
-In this setting, estimated callback probabilities were `r pct(prediction_data$probability[1])` for a Black-signaling name and `r pct(prediction_data$probability[2])` for a White-signaling name. The estimated difference (White minus Black) was `r pp(probability_gap)` percentage points, with an approximate 95% confidence interval from `r pp(gap_ci[1])` to `r pp(gap_ci[2])` percentage points.
-
-## 3.Sensitivity to including city
+## 2.Sensitivity to including city
 
 M2 and M3 use the same applications and the same job advertisement random intercept. Comparing their racial-signal odds ratios shows how much the estimate changes when city is included.
 
@@ -409,8 +357,8 @@ city_adjusted_or <- broom.mixed::tidy(
             upper = exp(conf.high))
 
 bind_rows(
-  "M2: Résumé quality" = select(race_or, odds_ratio, lower, upper),
-  "M3: Résumé quality and city" = city_adjusted_or,
+  "M2: Resume quality" = select(race_or, odds_ratio, lower, upper),
+  "M3: Resume quality and city" = city_adjusted_or,
   .id = "model"
 ) |>
   gt() |>
@@ -423,5 +371,5 @@ bind_rows(
 The estimated odds ratio was `r sprintf("%.2f", race_or$odds_ratio)` in M2 and `r sprintf("%.2f", city_adjusted_or$odds_ratio)` after including city in M3.
 
 # Part 6. Findings and limitations
-The adjusted model estimated a White-minus-Black callback probability difference of `r pp(probability_gap)` percentage points for low-quality résumés at a zero advertisement random intercept. The odds ratio summarizes the name-signal contrast across the two résumé quality levels. Random assignment supports interpreting the contrast in terms of the assigned names in this experiment. Names can convey several social cues at once, so a mechanism specifically attributable to perceived race requires additional evidence. The outcome records a callback, and the study's scope is limited to the sampled jobs and the two cities during the study period. The adjusted model estimates a common odds ratio for the name signal. A question about whether résumé quality changes that odds ratio would require an interaction term.
+In Model 2, for applications of the same resume quality sent to the same job opening, the estimated odds of receiving a callback were `r sprintf("%.2f", race_or$odds_ratio)` times as high for applications with White-signaling names as for applications with Black-signaling names (95% CI [`r sprintf("%.2f", race_or$lower)`, `r sprintf("%.2f", race_or$upper)`]). With city included in Model 3, the estimated odds ratio was `r sprintf("%.2f", city_adjusted_or$odds_ratio)`. The estimates were similar across the two models. This difference in callback odds matters because an employer’s response can determine whether an applicant gets a chance to move forward in the hiring process.
 

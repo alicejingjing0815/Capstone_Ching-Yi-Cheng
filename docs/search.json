@@ -60,20 +60,13 @@
     "href": "Capstone.html#adjusted-odds-ratios",
     "title": "Capstone: Who Gets a Callback? Racial Signals, Resume Quality, and Hiring Responses",
     "section": "1.Adjusted odds ratios",
-    "text": "1.Adjusted odds ratios\nThe odds ratios compare applications at a common job advertisement random-intercept value, holding the other fixed predictor constant. An odds ratio above 1 indicates higher odds of a callback for the category listed first.\n\n\n\n\nTable 3: Adjusted callback odds ratios from M2\n\n\n\n\n\n\n\n\n\nComparison\nOdds ratio\n95% CI lower\n95% CI upper\n\n\n\n\nWhite signal vs. Black signal\n3.04\n2.15\n4.29\n\n\nHigh vs. low résumé quality\n1.65\n1.18\n2.32\n\n\n\n\n\n\n\n\n\n\nThe adjusted odds ratio for a White-signaling name relative to a Black-signaling name was 3.04 (95% CI 2.15 to 4.29)."
-  },
-  {
-    "objectID": "Capstone.html#predicted-callback-probabilities",
-    "href": "Capstone.html#predicted-callback-probabilities",
-    "title": "Capstone: Who Gets a Callback? Racial Signals, Resume Quality, and Hiring Responses",
-    "section": "2.Predicted callback probabilities",
-    "text": "2.Predicted callback probabilities\nTo show the comparison in percentage points, the plot holds résumé quality at low. It sets the job advertisement random intercept to zero. The intervals reflect uncertainty in the estimated probabilities for this specified setting.\n\n\n\n\n\n\n\n\nFigure 6: Estimated callback probabilities for low-quality résumés, with the job advertisement random intercept set to zero.\n\n\n\n\n\n\n\n\n  \n\n\n\n         2 \n0.02337869 \n\n\n[1] 0.006459613 0.040297773\n\n\nIn this setting, estimated callback probabilities were 0.0% for a Black-signaling name and 0.0% for a White-signaling name. The estimated difference (White minus Black) was 0.0 percentage points, with an approximate 95% confidence interval from 0.0 to 0.0 percentage points."
+    "text": "1.Adjusted odds ratios\nThe odds ratios compare applications at a common job advertisement random-intercept value, holding the other fixed predictor constant. An odds ratio above 1 indicates higher odds of a callback for the category listed first.\n\n\n\n\nTable 3: Adjusted callback odds ratios from M2\n\n\n\n\n\n\n\n\n\nComparison\nOdds ratio\n95% CI lower\n95% CI upper\n\n\n\n\nWhite signal vs. Black signal\n3.04\n2.15\n4.29\n\n\nHigh vs. low resume quality\n1.65\n1.18\n2.32\n\n\n\n\n\n\n\n\n\n\nThe adjusted odds ratio for a White-signaling name relative to a Black-signaling name was 3.04 (95% CI 2.15 to 4.29)."
   },
   {
     "objectID": "Capstone.html#sensitivity-to-including-city",
     "href": "Capstone.html#sensitivity-to-including-city",
     "title": "Capstone: Who Gets a Callback? Racial Signals, Resume Quality, and Hiring Responses",
-    "section": "3.Sensitivity to including city",
-    "text": "3.Sensitivity to including city\nM2 and M3 use the same applications and the same job advertisement random intercept. Comparing their racial-signal odds ratios shows how much the estimate changes when city is included.\n\n\n\n\nTable 4: Racial-signal odds ratios before and after accounting for city\n\n\n\n\n\n\n\n\n\nModel and adjustment variables\nOdds ratio\n95% CI lower\n95% CI upper\n\n\n\n\nM2: Résumé quality\n3.04\n2.15\n4.29\n\n\nM3: Résumé quality and city\n3.03\n2.15\n4.29\n\n\n\n\n\n\n\n\n\n\nThe estimated odds ratio was 3.04 in M2 and 3.03 after including city in M3."
+    "section": "2.Sensitivity to including city",
+    "text": "2.Sensitivity to including city\nM2 and M3 use the same applications and the same job advertisement random intercept. Comparing their racial-signal odds ratios shows how much the estimate changes when city is included.\n\n\n\n\nTable 4: Racial-signal odds ratios before and after accounting for city\n\n\n\n\n\n\n\n\n\nModel and adjustment variables\nOdds ratio\n95% CI lower\n95% CI upper\n\n\n\n\nM2: Resume quality\n3.04\n2.15\n4.29\n\n\nM3: Resume quality and city\n3.03\n2.15\n4.29\n\n\n\n\n\n\n\n\n\n\nThe estimated odds ratio was 3.04 in M2 and 3.03 after including city in M3."
   }
 ]

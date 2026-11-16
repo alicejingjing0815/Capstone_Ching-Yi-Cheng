@@ -238,51 +238,8 @@ odds_results |>
              lower = "95% CI lower", upper = "95% CI upper") |>
   fmt_number(columns = c(odds_ratio, lower, upper), decimals = 2)
 
-## 2.Predicted callback probabilities
-#| label: fig-probabilities
-#| fig-cap: "Estimated callback probabilities for low-quality résumés, with the job advertisement random intercept set to zero."
 
-prediction_data <- tibble(
-  race = factor(levels(analysis_data$race), levels = levels(analysis_data$race)),
-  resume_quality = factor("Low", levels = levels(analysis_data$resume_quality))
-)
-
-# Calculate fixed-effect predictions on the logit scale.
-fixed_coefs <- glmmTMB::fixef(preferred_model)$cond
-fixed_cov <- vcov(preferred_model)$cond
-design <- model.matrix(~ race + resume_quality, prediction_data)
-design <- design[, names(fixed_coefs), drop = FALSE]
-logit_fit <- drop(design %*% fixed_coefs)
-logit_cov <- design %*% fixed_cov %*% t(design)
-logit_se <- sqrt(diag(logit_cov))
-
-prediction_data <- prediction_data |>
-  mutate(
-    probability = plogis(logit_fit),
-    lower = plogis(logit_fit - 1.96 * logit_se),
-    upper = plogis(logit_fit + 1.96 * logit_se)
-  )
-
-# Estimate the White-minus-Black probability difference using the delta method.
-probability_gap <- diff(prediction_data$probability)
-gap_gradient <- c(-1, 1) * prediction_data$probability *
-  (1 - prediction_data$probability)
-gap_se <- sqrt(drop(t(gap_gradient) %*% logit_cov %*% gap_gradient))
-gap_ci <- probability_gap + c(-1, 1) * 1.96 * gap_se
-
-ggplot(prediction_data, aes(x = race, y = probability)) +
-  geom_pointrange(aes(ymin = lower, ymax = upper), color = "#2C5F7C") +
-  scale_y_continuous(labels = scales::label_percent(accuracy = 1),
-                     limits = c(0, NA)) +
-  labs(x = "Racial signal conveyed by the assigned name",
-       y = "Predicted probability of a callback") +
-  theme_minimal(base_size = 12)
-
-prediction_data |> select(race, probability, lower, upper)
-100 * probability_gap
-100 * gap_ci
-
-## 3.Sensitivity to including city
+## 2.Sensitivity to including city
 #| label: tbl-city-sensitivity
 #| tbl-cap: "Racial-signal odds ratios before and after accounting for city"
 
@@ -307,27 +264,4 @@ bind_rows(
 
 
 # Part 6. Findings and limitations
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
